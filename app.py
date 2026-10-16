@@ -1,16 +1,12 @@
 """
 StreamView Analytics - Dashboard para la Gerencia de Marketing (Dash + Plotly)
 
-Este archivo solo LEE los 4 CSV que genera el notebook de preparación
-(notebooks/StreamView_Analytics.ipynb). No limpia ni corrige datos.
-
-Los CSV se leen desde ../data/processed/:
-    catalogo_limpio.csv, generos.csv, paises.csv, peliculas_finanzas.csv
-
-Ejecución (desde la carpeta dashboard/):
+Este archivo lee los 4 CSV procesados.
+Ejecución local:
     pip install -r requirements.txt
-    python app.py        ->  abrir http://127.0.0.1:8050
+    python app.py
 """
+import os
 from pathlib import Path
 
 import numpy as np
@@ -91,8 +87,6 @@ PAISES_ES = {
     "Thailand": "Tailandia", "Taiwan": "Taiwán", "Philippines": "Filipinas",
 }
 
-
-# Códigos ISO-3 para dibujar el mapa de países (Plotly los necesita para ubicar cada país)
 ISO_PAIS = {
     "Afghanistan": "AFG", "Albania": "ALB", "Algeria": "DZA", "Angola": "AGO", "Argentina": "ARG",
     "Armenia": "ARM", "Aruba": "ABW", "Australia": "AUS", "Austria": "AUT", "Azerbaijan": "AZE",
@@ -148,7 +142,6 @@ def pais_es(x):
 # 2. CARGA DE DATOS (solo lectura)
 # ---------------------------------------------------------------------------
 def con_uid(tabla):
-    """Identificador único de título: tipo + show_id (show_id se repite entre tipos)."""
     tabla["uid"] = tabla["type"].str[0] + tabla["show_id"].astype(str)
     tabla["formato"] = tabla["type"].map(FORMATOS)
     return tabla
@@ -164,7 +157,6 @@ def cargar():
     pais = pd.read_csv(DATA / "paises.csv", usecols=[
         "show_id", "type", "país", "popularity", "valoracion", "release_year"])
     cat, gen, pais = con_uid(cat), con_uid(gen), con_uid(pais)
-    # Excluimos las etiquetas de ausencia de los rankings y filtros
     gen = gen[~gen["género"].str.casefold().isin(GEN_INVALIDOS)]
     pais = pais[~pais["país"].str.casefold().isin(PAIS_INVALIDOS)]
     cat["idioma_valido"] = ~cat["language"].astype(str).str.casefold().isin(IDIOMA_INVALIDOS)
@@ -181,7 +173,6 @@ OPC_GENERO = [{"label": gen_es(g), "value": g}
 OPC_PAIS = [{"label": pais_es(p), "value": p}
             for p in sorted(pais_ok["país"].unique(), key=pais_es)]
 
-# Fechas en blanco puro para el RangeSlider
 MARKS_ANIOS = {
     a: {"label": str(a), "style": {"color": "#FFFFFF", "fontSize": "11px", "fontWeight": "600"}}
     for a in range(ANIO_MIN, ANIO_MAX + 1, 3)
@@ -190,7 +181,6 @@ MARKS_ANIOS[ANIO_MAX] = {"label": str(ANIO_MAX), "style": {"color": "#FFFFFF", "
 
 
 def filtrar(formato, generos, paises, anios):
-    """Aplica los 4 filtros al catálogo (una fila por título)."""
     desde, hasta = anios
     df = cat[cat["release_year"].between(desde, hasta)]
     if formato in FORMATOS:
@@ -206,7 +196,6 @@ def filtrar(formato, generos, paises, anios):
 # 3. FORMATO Y COMPONENTES VISUALES
 # ---------------------------------------------------------------------------
 def num(x, d=1):
-    """Número con formato chileno: miles con punto y decimales con coma."""
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return "s/d"
     s = f"{x:,.{d}f}"
@@ -298,7 +287,7 @@ def grilla(*tarjetas, columnas=2):
 
 
 # ---------------------------------------------------------------------------
-# 4. VISTAS (una por pestaña)
+# 4. VISTAS
 # ---------------------------------------------------------------------------
 def vista_resumen(df, formato):
     n = len(df)
@@ -379,7 +368,6 @@ def vista_catalogo(df, formato):
     gen_f = gen_ok[gen_ok["uid"].isin(uids)]
     pais_f = pais_ok[pais_ok["uid"].isin(uids)]
 
-    # Géneros: top 10 por cantidad, apilado por formato
     g = gen_f.groupby(["género", "formato"])["uid"].nunique().reset_index(name="cantidad")
     top_g = g.groupby("género")["cantidad"].sum().nlargest(10).index
     g = g[g["género"].isin(top_g)].copy()
@@ -392,7 +380,6 @@ def vista_catalogo(df, formato):
     t_g = (f"{tot.index[0]} y {tot.index[1]} lideran la oferta con {num(tot.iloc[0], 0)} y {num(tot.iloc[1], 0)} títulos"
            if len(tot) >= 2 else "Géneros con más títulos")
 
-    # Países: top 12 por títulos
     p = pais_f.groupby("país").agg(cantidad=("uid", "nunique"),
                                    pop=("popularity", "median")).nlargest(12, "cantidad").reset_index()
     p["nombre"] = p["país"].map(pais_es)
@@ -403,7 +390,6 @@ def vista_catalogo(df, formato):
     t_p = (f"{p.iloc[0]['nombre']} lidera con {num(p.iloc[0]['cantidad'], 0)} títulos "
            f"({num(100 * p.iloc[0]['cantidad'] / con_pais, 1)}% de los que tienen país)") if len(p) else "Países con más títulos"
 
-    # Idiomas: top 12 por títulos
     idi = df[df["idioma_valido"]].groupby("language").agg(cantidad=("uid", "size"),
                                                           pop=("popularity", "median")).nlargest(12, "cantidad").reset_index()
     idi["nombre"] = idi["language"].map(idioma_es)
@@ -414,7 +400,6 @@ def vista_catalogo(df, formato):
     t_i = (f"{idi.iloc[0]['nombre']} concentra el {num(100 * idi.iloc[0]['cantidad'] / total_idi, 1)}% de los títulos"
            if len(idi) else "Idiomas con más títulos")
 
-    # Treemap: tamaño = títulos por género, color = valoración media
     gv = gen_f.groupby("género").agg(cantidad=("uid", "nunique"), val=("valoracion", "mean")).reset_index()
     gv["nombre"] = gv["género"].map(gen_es)
     if len(gv) >= 2 and gv["val"].notna().any():
@@ -439,7 +424,6 @@ def vista_catalogo(df, formato):
     else:
         fig_tm, t_tm = go.Figure(), "Pocos géneros con estos filtros"
 
-    # Mapa de países: color = títulos (escala logarítmica); el detalle aparece al pasar el cursor
     pm = pais_f.groupby("país").agg(cantidad=("uid", "nunique"), pop=("popularity", "median"),
                                     val=("valoracion", "mean")).reset_index()
     pm["iso"] = pm["país"].map(ISO_PAIS)
@@ -470,7 +454,6 @@ def vista_catalogo(df, formato):
     else:
         fig_m, t_m = go.Figure(), "Sin países para mostrar con estos filtros"
 
-    nota = aviso("Nota de catálogo: un título puede asociarse a múltiples géneros o países de coproducción, por lo que las sumas de categorías no equivalen directamente al total de títulos únicos.")
     return html.Div([
         intro("Gerencia de Marketing", "en qué géneros hay inventario para sostener campañas permanentes y en qué países e idiomas segmentar"),
         grilla(tarjeta(t_g, "Top 10 géneros por cantidad de títulos, separados por formato.", estilo(fig_g, 400)),
@@ -479,63 +462,11 @@ def vista_catalogo(df, formato):
                        estilo(fig_tm, 400, False)),
                tarjeta(t_m, "Color = cantidad de títulos por país (escala logarítmica). Pasa el cursor para ver popularidad y valoración.",
                        estilo(fig_m, 400, False))),
-        grilla(tarjeta(t_i, "Top 12 idiomas por cantidad de títulos (idiomas informados).", estilo(fig_i, 400, False)),
-               nota),
+        grilla(tarjeta(t_i, "Top 12 idiomas por cantidad de títulos (idiomas informados).", estilo(fig_i, 400, False)), columnas=1),
     ])
 
 
-def plan_campanas(df, nichos, idi):
-    """Tabla 'Plan de campañas sugerido', generada con los datos del filtro actual."""
-    filas = []
-    con_votos = df[df["vote_count"] >= MIN_VOTOS_TOP]
-
-    top = con_votos.nlargest(3, "popularity")
-    if len(top):
-        filas.append(("Campañas masivas", ", ".join(top["title"]),
-                      f"Popularidad de {num(top['popularity'].min(), 0)} a {num(top['popularity'].max(), 0)}, "
-                      f"frente a una mediana de {num(df['popularity'].median(), 1)}",
-                      "Encabezar campañas de alcance y notoriedad. Los programas diarios sirven para recordación; no equivalen a un estreno."))
-
-    est = con_votos[con_votos["release_year"] >= ANIO_MAX - 1].nlargest(3, "popularity")
-    if len(est):
-        filas.append(("Campañas de estreno", ", ".join(est["title"]),
-                      f"Estrenos {ANIO_MAX - 1}-{ANIO_MAX} con mayor popularidad (mínimo {MIN_VOTOS_TOP} votos)",
-                      "Lanzamientos con campaña propia mientras la tracción está alta."))
-
-    gen_f = gen_ok[gen_ok["uid"].isin(df["uid"])]
-    tg = gen_f.groupby("género")["uid"].nunique().nlargest(3)
-    if len(tg):
-        filas.append(("Campañas permanentes", ", ".join(gen_es(g) for g in tg.index),
-                      " · ".join(f"{gen_es(g)}: {num(n, 0)} títulos" for g, n in tg.items()),
-                      "Campañas continuas y segmentadas: hay inventario para renovar anuncios durante varias semanas sin depender de uno o dos títulos."))
-
-    if nichos:
-        filas.append(("Campañas piloto", ", ".join(f"{n['nombre']} ({n['formato'].lower()})" for n in nichos),
-                      "Popularidad mediana sobre el percentil 75 y oferta bajo el percentil 35",
-                      "Pruebas de audiencia con presupuesto acotado y evaluar la adquisición de más títulos."))
-
-    if len(idi):
-        mejor = idi.loc[idi["pop"].idxmax()]
-        asia = df[df["idioma_valido"]]["language"].isin(["zh", "ja", "ko"]).sum() / max(int(df["idioma_valido"].sum()), 1) * 100
-        filas.append(("Campañas por mercado", f"{mejor['nombre']} y bloque asiático (chino, japonés, coreano)",
-                      f"{mejor['nombre']}: popularidad mediana {num(mejor['pop'], 1)}. "
-                      f"Chino, japonés y coreano suman {num(asia, 1)}% de los títulos",
-                      "Campañas segmentadas por idioma o comunidad; medir la respuesta antes de ampliar la inversión."))
-
-    if not filas:
-        return aviso("Con estos filtros no hay datos suficientes para sugerir campañas.")
-    cabecera = html.Tr([html.Th(t) for t in ["Tipo de campaña", "Qué promocionar", "Evidencia", "Acción sugerida"]])
-    cuerpo = [html.Tr([html.Td(c) for c in f]) for f in filas]
-    return html.Div([
-        html.H3("Plan de campañas sugerido"),
-        html.P("Se actualiza con los filtros. Es una guía basada en popularidad y oferta del catálogo; "
-               "no mide retención ni conversión.", className="chart-subtitle"),
-        html.Table([html.Thead(cabecera), html.Tbody(cuerpo)], className="tabla-plan"),
-    ], className="chart-card plan-card")
-
-
 def vista_campanas(df, formato):
-    # Top 10 títulos con al menos 100 votos
     top = df[df["vote_count"] >= MIN_VOTOS_TOP].nlargest(10, "popularity").sort_values("popularity")
     if len(top):
         n_s = int((top["type"] == "TV Show").sum())
@@ -547,14 +478,12 @@ def vista_campanas(df, formato):
     else:
         fig_t, t_t = go.Figure(), "Sin títulos con 100 votos o más en este filtro"
 
-    # Oportunidad: género x formato (cada género se compara dentro de su formato)
     gen_f = gen_ok[gen_ok["uid"].isin(df["uid"])]
     g = gen_f.groupby(["género", "formato"]).agg(cantidad=("uid", "nunique"),
                                                  pop=("popularity", "median")).reset_index()
     g = g[g["cantidad"] >= MIN_TITULOS_GENERO].copy()
     g["nombre"] = g["género"].map(gen_es)
     fig_o, t_o = go.Figure(), "Pocos géneros con estos filtros para comparar oportunidades"
-    nichos_lista = []
     if len(g) >= 4:
         p75, p35 = g["pop"].quantile(0.75), g["cantidad"].quantile(0.35)
         g["nicho"] = (g["pop"] > p75) & (g["cantidad"] < p35)
@@ -569,14 +498,12 @@ def vista_campanas(df, formato):
         fig_o.add_vline(x=p35, line_dash="dot", line_color=COL["morado_claro"])
         fig_o.add_hline(y=p75, line_dash="dot", line_color=COL["morado_claro"])
         nichos = g[g["nicho"]]
-        nichos_lista = nichos.to_dict("records")
         if len(nichos):
             lista = ", ".join(f"{r.nombre} ({r.formato.lower()})" for r in nichos.itertuples())
             t_o = f"Oportunidad: {lista} combinan popularidad alta y oferta baja"
         else:
             t_o = "Con estos filtros ningún género combina popularidad alta y oferta baja"
 
-    # Idiomas: popularidad mediana entre los 12 con más títulos
     idi = df[df["idioma_valido"]].groupby("language").agg(cantidad=("uid", "size"),
                                                           pop=("popularity", "median")).nlargest(12, "cantidad").reset_index()
     idi["nombre"] = idi["language"].map(idioma_es)
@@ -593,16 +520,12 @@ def vista_campanas(df, formato):
 
     return html.Div([
         intro("Gerencia de Marketing", "qué títulos, géneros e idiomas promocionar y dónde probar campañas piloto"),
-        plan_campanas(df, nichos_lista, idi),
         grilla(tarjeta(t_t, "Pregunta clave 1: top 10 por popularidad, solo títulos con 100 votos o más.", estilo(fig_t, 420)),
                tarjeta(t_o, f"Pregunta clave 2: cada punto es un género dentro de su formato (mínimo {MIN_TITULOS_GENERO} títulos). "
                             "Líneas: percentil 75 de popularidad y percentil 35 de oferta. "
                             "Se comparan géneros dentro del mismo formato porque las series tienen mayor popularidad.",
                        estilo(fig_o, 420))),
-        grilla(tarjeta(t_i, "Pregunta clave 4: popularidad mediana de los 12 idiomas con más títulos.", estilo(fig_i, 380, False)),
-               aviso("Cómo leer esta página: arriba está el plan de campañas sugerido y debajo la evidencia que lo respalda. "
-                     "Los títulos más populares sirven para campañas masivas; los géneros con mucha oferta, para campañas "
-                     "permanentes; y los de popularidad alta con poca oferta, para campañas piloto o posibles adquisiciones.")),
+        grilla(tarjeta(t_i, "Pregunta clave 4: popularidad mediana de los 12 idiomas con más títulos.", estilo(fig_i, 380, False)), columnas=1),
     ])
 
 
@@ -629,7 +552,6 @@ def vista_finanzas(df, formato):
         kpi("Recuperan el presupuesto", f"{num(recupera, 1)}%", "retorno de 1x o más"),
     ], className="kpi-grid kpi-compacto")
 
-    # Retorno mediano por género
     gg = gen_ok[gen_ok["uid"].isin(base["uid"])].merge(base[["uid", "retorno"]], on="uid")
     r = gg.groupby("género").agg(n=("uid", "nunique"), mediana=("retorno", "median")).reset_index()
     r = r[r["n"] >= MIN_PELIS_GENERO].copy()
@@ -645,7 +567,6 @@ def vista_finanzas(df, formato):
     else:
         fig_r, t_r = go.Figure(), "Pocos géneros con películas suficientes para comparar"
 
-    # Presupuesto vs ingresos
     sc = base.copy()
     sc["estado"] = np.where(sc["retorno"] >= 1, "Recupera el presupuesto", "No lo recupera")
     fig_s = px.scatter(sc, x="budget", y="revenue", color="estado", log_x=True, log_y=True, opacity=0.7,
@@ -657,7 +578,6 @@ def vista_finanzas(df, formato):
                                line=dict(dash="dot", color=COL["texto_sec"], width=1.5), hoverinfo="skip"))
     t_s = f"{num(recupera, 0)}% de las películas con datos recupera su presupuesto"
 
-    # Top 10 retorno
     top = base.nlargest(10, "retorno").sort_values("retorno")
     fig_t = px.bar(top, x="retorno", y="title", orientation="h",
                    labels={"retorno": "Retorno (veces)", "title": ""},
@@ -672,13 +592,7 @@ def vista_finanzas(df, formato):
                             "La línea marca 1x (recupera lo invertido).", estilo(fig_r, 460, False)),
                tarjeta(t_s, "Cada punto es una película. Sobre la diagonal, los ingresos superan el presupuesto.",
                        estilo(fig_s, 460))),
-        grilla(tarjeta(t_t, "Ranking de retorno (ingresos / presupuesto).", estilo(fig_t, 420, False)),
-               aviso(f"Base financiera: películas con presupuesto e ingresos de al menos {num(MIN_MONTO, 0)} y presupuesto "
-                     f"no sospechoso (n = {num(len(base), 0)}, {num(100 * len(base) / len(pelis), 1)}% de las películas del "
-                     "filtro). Se descartan montos simbólicos que producen retornos irreales. El retorno es un múltiplo, no "
-                     "una utilidad: no incluye marketing ni otros costos, y la fuente no documenta la moneda. Presupuesto e ingresos son "
-                     "montos de producción y recaudación de cada película, no la inversión en marketing; sirven para priorizar "
-                     "qué películas y géneros promocionar.")),
+        grilla(tarjeta(t_t, "Ranking de retorno (ingresos / presupuesto).", estilo(fig_t, 420, False)), columnas=1),
     ])
 
 
@@ -725,7 +639,7 @@ VISTAS = {"resumen": vista_resumen, "catalogo": vista_catalogo, "campanas": vist
 # ---------------------------------------------------------------------------
 app = Dash(__name__)
 app.title = "StreamView Analytics"
-server = app.server  # para publicar con gunicorn
+server = app.server  # Servidor WSGI para Gunicorn (Render)
 
 app.layout = html.Div([
     html.Div([
@@ -823,7 +737,6 @@ app.index_string = """
     {%favicon%}
     {%css%}
     <style>
-        /* ================= BASE / RESET ================= */
         * { box-sizing: border-box; }
         body {
             margin: 0;
@@ -839,7 +752,6 @@ app.index_string = """
             padding: 26px 30px 48px;
         }
 
-        /* ================= VARIABLES GLOBALES DE DASH ================= */
         :root,
         body,
         .dash-dropdown,
@@ -856,13 +768,11 @@ app.index_string = """
             --Dash-Shading-Weak: rgba(0, 0, 0, 0.5) !important;
         }
 
-        /* ================= SCROLLBARS ================= */
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #0D0D0D; }
         ::-webkit-scrollbar-thumb { background: #27272A; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #3F3F46; }
 
-        /* ================= HEADER & BRAND ================= */
         .header {
             display: flex;
             align-items: center;
@@ -924,7 +834,6 @@ app.index_string = """
             box-shadow: 0 0 15px rgba(168, 85, 247, 0.1);
         }
 
-        /* ================= FILTER CONTAINER ================= */
         .filtros {
             display: flex;
             gap: 16px;
@@ -964,7 +873,6 @@ app.index_string = """
             margin-bottom: 6px;
         }
 
-        /* ================= DASH DROPDOWN (RADIX UI / MODERN ENGINE) ================= */
         .dash-dropdown,
         button.dash-dropdown {
             background-color: #27272A !important;
@@ -1077,7 +985,6 @@ app.index_string = """
             height: 15px !important;
         }
 
-        /* ================= RETROCOMPATIBILIDAD CON SELECT CLÁSICO ================= */
         .Select-control {
             background-color: #27272A !important;
             background: #27272A !important;
@@ -1106,7 +1013,6 @@ app.index_string = """
             color: #E879F9 !important;
         }
 
-        /* ================= RANGE SLIDER (AÑOS DE ESTRENO) ================= */
         .rc-slider-rail {
             background-color: #27272A !important;
             height: 6px !important;
@@ -1128,7 +1034,6 @@ app.index_string = """
             font-size: 11px !important;
         }
 
-        /* ================= BUTTONS ================= */
         .btn {
             border: 1px solid #A855F7;
             background: transparent;
@@ -1168,7 +1073,6 @@ app.index_string = """
             transform: translateY(-1px);
         }
 
-        /* ================= TABS ================= */
         .tabs, .tab-container {
             margin-bottom: 20px;
             border-bottom: 1px solid #27272A;
@@ -1204,7 +1108,6 @@ app.index_string = """
             box-shadow: inset 0 -2px 12px rgba(168, 85, 247, 0.22) !important;
         }
 
-        /* ================= INTRO & AVISO ================= */
         .page-intro {
             display: flex;
             gap: 24px;
@@ -1232,7 +1135,6 @@ app.index_string = """
             box-shadow: 0 4px 16px rgba(126, 34, 206, 0.15);
         }
 
-        /* ================= KPI CARDS ================= */
         .kpi-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
@@ -1299,7 +1201,6 @@ app.index_string = """
             line-height: 1.35;
         }
 
-        /* ================= CHART CARDS & GRIDS ================= */
         .dashboard-grid {
             display: grid;
             gap: 16px;
@@ -1333,7 +1234,6 @@ app.index_string = """
             line-height: 1.4;
         }
 
-        /* ================= MENSAJES CLAVE ================= */
         .mensajes {
             margin-bottom: 18px;
             padding: 18px 22px;
@@ -1356,17 +1256,6 @@ app.index_string = """
             color: #C084FC;
         }
 
-        /* ================= TABLA PLAN DE CAMPAÑAS ================= */
-        .plan-card { margin-bottom: 18px; }
-        .tabla-plan { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0 12px; }
-        .tabla-plan th { text-align: left; color: #D8B4FE; font-size: 11px; text-transform: uppercase;
-                         letter-spacing: 0.7px; padding: 8px 10px; border-bottom: 1px solid #3F3F46; }
-        .tabla-plan td { padding: 10px; border-bottom: 1px solid #27272A; vertical-align: top;
-                         line-height: 1.45; color: #E5E7EB; }
-        .tabla-plan td:first-child { color: #F9FAFB; font-weight: 700; white-space: nowrap; }
-        .tabla-plan tr:hover td { background: #1F1B29; }
-
-        /* ================= PIE DE PÁGINA ================= */
         .pie {
             color: #6B7280;
             font-size: 12px;
@@ -1376,7 +1265,6 @@ app.index_string = """
             border-top: 1px solid #1F1F23;
         }
 
-        /* ================= RESPONSIVE ================= */
         @media (max-width: 1024px) {
             .dashboard-grid.cols-2 { grid-template-columns: 1fr; }
             .page { padding: 18px 18px 36px; }
@@ -1391,4 +1279,5 @@ app.index_string = """
 """
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 8050))
+    app.run(host="0.0.0.0", port=port, debug=False)
